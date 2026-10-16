@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a focused improvement to AgentGuard Core
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem being solved
+      description: Describe the user problem, not only the desired implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed functionality
+    validations:
+      required: true
+  - type: textarea
+    id: benefit
+    attributes:
+      label: Expected benefit
+    validations:
+      required: true
+  - type: dropdown
+    id: mvp
+    attributes:
+      label: MVP relevance
+      description: Is this required for the documented MVP or a roadmap enhancement?
+      options:
+        - Required for MVP
+        - Roadmap enhancement
+        - Unsure
+    validations:
+      required: true
