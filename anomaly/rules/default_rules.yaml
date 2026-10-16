@@ -1,0 +1,21 @@
+# Anomaly detection rules
+# These values can override the engine defaults at runtime.
+
+token_spike:
+  multiplier: 3.0        # Alert when tokens exceed mean × multiplier
+  window: 20             # Rolling window size (number of recent events)
+
+loop_detector:
+  max_iterations: 10     # Same tool invoked ≥ this count → loop alert
+
+silent_failure:
+  timeout_seconds: 30    # No completion event within N seconds → alert
+
+semantic_checker:
+  enabled: true
+  model: phi4
+  only_on_events:       # Run semantic checks only on these event types
+    - chain.end
+    - agent.finish
+    - task.end
+    - crew.end
