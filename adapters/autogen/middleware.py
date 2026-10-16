@@ -14,12 +14,12 @@ import os
 import time
 from typing import Any
 
-import redis
-
-from adapters.otel.schema import UnifiedEvent
+from adapters.base import BaseAdapter
+from adapters.otel.schema import EventStatus, EventType, Framework
+from adapters.publisher import EventPublisher, RedisEventPublisher
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-REDIS_STREAM_KEY = os.getenv("REDIS_STREAM_KEY", "agent_events")
+REDIS_STREAM_KEY = os.getenv("REDIS_STREAM_KEY", "agent.events")
 
 
 class AutoGenMiddleware:
@@ -31,20 +31,37 @@ class AutoGenMiddleware:
         self,
         agent: Any,
         agent_id: str,
+        publisher: EventPublisher | None = None,
+        task_id: str = "default",
+        team_id: str = "default",
+        parent_agent_id: str | None = None,
+        trace_id: str | None = None,
         redis_url: str = REDIS_URL,
         stream_key: str = REDIS_STREAM_KEY,
     ) -> None:
         self.agent = agent
         self.agent_id = agent_id
-        self._redis = redis.from_url(redis_url, decode_responses=True)
-        self._stream_key = stream_key
+        if publisher is None:
+            import redis
+
+            publisher = RedisEventPublisher(
+                redis.from_url(redis_url, decode_responses=True),
+                stream_key,
+            )
+        self._adapter = BaseAdapter(
+            agent_id=agent_id,
+            agent_name=getattr(agent, "name", ""),
+            framework=Framework.AUTOGEN,
+            publisher=publisher,
+            task_id=task_id,
+            team_id=team_id,
+            parent_agent_id=parent_agent_id,
+            trace_id=trace_id,
+        )
         self._patch()
 
-    def _publish(self, event: UnifiedEvent) -> None:
-        try:
-            self._redis.xadd(self._stream_key, event.to_redis_payload(), maxlen=10_000, approximate=True)
-        except Exception:
-            pass
+    def _publish(self, event_type: EventType, status: EventStatus, payload: dict[str, Any]) -> None:
+        self._adapter.publish_event(event_type, status, payload)
 
     def _patch(self) -> None:
         """Monkey-patch generate_reply to capture LLM calls."""
@@ -53,35 +70,31 @@ class AutoGenMiddleware:
         @functools.wraps(original_generate)
         def patched_generate_reply(messages=None, sender=None, **kwargs):
             start = time.monotonic()
-            self._publish(UnifiedEvent(
-                event_type="agent.generate_reply.start",
-                agent_id=self.agent_id,
-                agent_name=getattr(self.agent, "name", ""),
-                framework="autogen",
-                payload={"message_count": len(messages) if messages else 0},
-            ))
+            self._publish(
+                EventType.START,
+                EventStatus.RUNNING,
+                {"operation": "generate_reply", "message_count": len(messages) if messages else 0},
+            )
             try:
                 result = original_generate(messages=messages, sender=sender, **kwargs)
                 elapsed = (time.monotonic() - start) * 1000
-                self._publish(UnifiedEvent(
-                    event_type="agent.generate_reply.end",
-                    agent_id=self.agent_id,
-                    agent_name=getattr(self.agent, "name", ""),
-                    framework="autogen",
-                    payload={
+                self._publish(
+                    EventType.FINISH,
+                    EventStatus.SUCCESS,
+                    {
+                        "operation": "generate_reply",
                         "duration_ms": round(elapsed, 2),
                         "sender": getattr(sender, "name", str(sender)),
+                        "output": str(result)[:1000],
                     },
-                ))
+                )
                 return result
             except Exception as exc:
-                self._publish(UnifiedEvent(
-                    event_type="agent.generate_reply.error",
-                    agent_id=self.agent_id,
-                    agent_name=getattr(self.agent, "name", ""),
-                    framework="autogen",
-                    payload={"error": str(exc)},
-                ))
+                self._publish(
+                    EventType.ERROR,
+                    EventStatus.FAILED,
+                    {"operation": "generate_reply", "error": str(exc)},
+                )
                 raise
 
         self.agent.generate_reply = patched_generate_reply
@@ -89,4 +102,9 @@ class AutoGenMiddleware:
 
 def instrument_autogen_agent(agent: Any, agent_id: str, **kwargs) -> AutoGenMiddleware:
     """Convenience function to instrument an AutoGen agent."""
-    return AutoGenMiddleware(agent, agent_id, **kwargs)
+    existing = getattr(agent, "__dict__", {}).get("_act_middleware")
+    if existing is not None:
+        return existing
+    middleware = AutoGenMiddleware(agent, agent_id, **kwargs)
+    setattr(agent, "_act_middleware", middleware)
+    return middleware
