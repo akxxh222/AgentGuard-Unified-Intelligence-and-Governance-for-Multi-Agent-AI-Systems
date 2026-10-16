@@ -2,7 +2,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import agents, costs, escalations
+from app.api.routes import agents, alerts, costs, escalations, events
 from app.api.websocket.events import alerts_endpoint, events_endpoint
 from app.api.websocket.manager import ws_manager
 from app.config import settings
@@ -21,6 +21,8 @@ app = FastAPI(title="Agent Control Tower", version="0.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 for router, prefix, tag in ((agents.router, "/agents", "agents"), (costs.router, "/costs", "costs"), (escalations.router, "/escalations", "escalations")):
     app.include_router(router, prefix=prefix, tags=[tag])
+app.include_router(events.router, prefix="/events", tags=["events"])
+app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
 app.include_router(costs.router, prefix="/api/v1/costs", tags=["costs"])
 app.include_router(escalations.router, prefix="/api/v1/escalations", tags=["escalations"])

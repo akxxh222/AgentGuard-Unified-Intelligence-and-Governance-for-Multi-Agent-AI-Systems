@@ -51,6 +51,12 @@ make demo
 make test
 ```
 
+For the backend-only collector tests, run this from the repository root:
+
+```bash
+cd backend && python -m pytest tests -q
+```
+
 ## Team Structure
 
 | Teammate | Owns |

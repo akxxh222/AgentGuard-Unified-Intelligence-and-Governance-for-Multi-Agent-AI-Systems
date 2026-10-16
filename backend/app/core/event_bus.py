@@ -47,5 +47,7 @@ class EventBus:
         inserted = await self.store.ingest(event)
         if inserted:
             data = event.model_dump(mode="json"); await ws_manager.broadcast("events", "agent_event", data)
-            if event.status.value in {"failed", "quarantined"} or event.event_type.value == "error": await ws_manager.broadcast("alerts", "alert", data)
+            if event.status.value in {"failed", "quarantined"} or event.event_type.value == "error":
+                alert = await self.store.add_alert(event)
+                await ws_manager.broadcast("alerts", "alert", alert)
         await self._redis.xack(settings.REDIS_STREAM_KEY, settings.REDIS_CONSUMER_GROUP, message_id)

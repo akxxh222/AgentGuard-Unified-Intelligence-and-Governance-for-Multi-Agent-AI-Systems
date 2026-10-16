@@ -5,7 +5,7 @@ from app.models.event import Event
 
 class StateStore:
     def __init__(self) -> None:
-        self._events: dict[str, Event] = {}; self._agents: dict[str, Event] = {}; self._escalations: dict[str, dict] = {}; self._lock = asyncio.Lock()
+        self._events: dict[str, Event] = {}; self._agents: dict[str, Event] = {}; self._alerts: dict[str, dict] = {}; self._escalations: dict[str, dict] = {}; self._lock = asyncio.Lock()
     async def ingest(self, event: Event) -> bool:
         async with self._lock:
             if event.event_id in self._events: return False
@@ -15,6 +15,16 @@ class StateStore:
         return sorted(rows, key=lambda e: e.timestamp, reverse=True)[offset:offset + limit]
     async def agent(self, agent_id: str): return self._agents.get(agent_id)
     async def events(self, start: datetime | None = None, end: datetime | None = None): return [e for e in self._events.values() if (start is None or e.timestamp >= start) and (end is None or e.timestamp <= end)]
+    async def recent_events(self, limit: int):
+        return sorted(self._events.values(), key=lambda event: event.timestamp, reverse=True)[:limit]
+    async def add_alert(self, event: Event) -> dict:
+        """Record one deterministic alert per event, making retries idempotent."""
+        async with self._lock:
+            alert = {"alert_id": event.event_id, "event_id": event.event_id, "agent_id": event.agent_id, "status": event.status.value, "event_type": event.event_type.value, "timestamp": event.timestamp, "trace_id": event.trace_id, "payload": event.payload}
+            self._alerts.setdefault(event.event_id, alert)
+            return self._alerts[event.event_id].copy()
+    async def recent_alerts(self, limit: int):
+        return sorted(self._alerts.values(), key=lambda alert: alert["timestamp"], reverse=True)[:limit]
     async def list_escalations(self, status=None, limit=100, offset=0):
         rows = list(self._escalations.values()); rows = [r for r in rows if status is None or r["status"] == status]
         return sorted(rows, key=lambda r: r["created_at"], reverse=True)[offset:offset + limit]
