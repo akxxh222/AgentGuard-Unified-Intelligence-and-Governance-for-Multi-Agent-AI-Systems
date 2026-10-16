@@ -30,6 +30,8 @@ LangChain / AutoGen / CrewAI
 
 The canonical schema includes agent, task, team, framework, trace, lifecycle status, token usage, cost, timestamp, and JSON payload fields.
 
+See [architecture.md](architecture.md) for the component boundaries, message contract, end-to-end demo flow, and deferred production features.
+
 ## Current Status
 
 The `mem1` branch contains the canonical schema, publishing boundary, shared trace and cost context, and adapters for LangChain, AutoGen, and CrewAI. The submission scope intentionally excludes hosted persistence, semantic LLM analysis, HITL workflows, and advanced orchestration.
