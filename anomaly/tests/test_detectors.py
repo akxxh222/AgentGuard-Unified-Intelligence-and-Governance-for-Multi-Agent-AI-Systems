@@ -79,12 +79,11 @@ class TestSilentFailureDetector:
         result = det.check({"agent_id": "a1", "task_id": "t1", "event_type": "chain.end"})
         assert result is None
 
-    def test_alert_when_timed_out(self):
-        import time
-        det = SilentFailureDetector(timeout_seconds=0)  # Immediate timeout
+    def test_alert_when_timed_out(self, monkeypatch):
+        clock = iter((10.0, 10.01))
+        monkeypatch.setattr("anomaly.detectors.silent_failure.time.monotonic", lambda: next(clock))
+        det = SilentFailureDetector(timeout_seconds=0)
         det.check({"agent_id": "a1", "task_id": "t1", "event_type": "chain.start"})
-        time.sleep(0.01)
-        # Trigger scan
         alert = det.check({"agent_id": "a1", "task_id": "t1", "event_type": "llm.start"})
         assert alert is not None
         assert alert["detector"] == "silent_failure"
