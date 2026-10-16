@@ -2,7 +2,6 @@ import React from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Activity,
-  AlertTriangle,
   ShieldBan,
   HelpCircle,
   XCircle,
@@ -30,20 +29,10 @@ const statusConfig: Record<
     variant: "running",
     icon: Activity,
   },
-  alert: {
-    label: "Alert",
-    variant: "alert",
-    icon: AlertTriangle,
-  },
   quarantined: {
     label: "Quarantined",
     variant: "quarantined",
     icon: ShieldBan,
-  },
-  escalating: {
-    label: "Escalating",
-    variant: "escalating",
-    icon: HelpCircle,
   },
   failed: {
     label: "Failed",

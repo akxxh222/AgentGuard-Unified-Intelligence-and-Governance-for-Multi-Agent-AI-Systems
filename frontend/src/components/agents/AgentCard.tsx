@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { Bot, ArrowRight, DollarSign, Activity } from "lucide-react";
+import { Bot, ArrowRight, Activity } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,9 +48,8 @@ export function AgentCard({ agent }: AgentCardProps) {
           </div>
           <div>
             <span className="text-zinc-500 block">COST</span>
-            <span className="text-emerald-400 tabular-nums flex items-center gap-0.5">
-              <DollarSign className="w-3 h-3" />
-              {agent.cost_usd.toFixed(4)}
+            <span className="text-emerald-400 tabular-nums">
+              ${agent.cost_usd.toFixed(4)}
             </span>
           </div>
         </div>
