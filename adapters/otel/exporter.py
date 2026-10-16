@@ -2,7 +2,6 @@
 Custom OpenTelemetry span exporter that publishes spans to Redis Streams.
 Drop-in replacement for any OTEL exporter (console, Jaeger, etc.).
 """
-import json
 import os
 from typing import Sequence
 
@@ -10,10 +9,11 @@ import redis
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from adapters.otel.schema import TokenUsage, UnifiedEvent
+from adapters.otel.schema import EventStatus, EventType, Framework, UnifiedEvent
+from adapters.publisher import EventPublisher, RedisEventPublisher
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-REDIS_STREAM_KEY = os.getenv("REDIS_STREAM_KEY", "agent_events")
+REDIS_STREAM_KEY = os.getenv("REDIS_STREAM_KEY", "agent.events")
 
 
 class RedisStreamExporter(SpanExporter):
@@ -35,55 +35,67 @@ class RedisStreamExporter(SpanExporter):
         redis_url: str = REDIS_URL,
         stream_key: str = REDIS_STREAM_KEY,
         max_stream_len: int = 10_000,
+        publisher: EventPublisher | None = None,
     ) -> None:
-        self._client = redis.from_url(redis_url, decode_responses=True)
-        self._stream_key = stream_key
-        self._max_stream_len = max_stream_len
+        self._client = None
+        if publisher is None:
+            self._client = redis.from_url(redis_url, decode_responses=True)
+            publisher = RedisEventPublisher(self._client, stream_key, max_stream_len)
+        self._publisher = publisher
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         try:
-            pipe = self._client.pipeline(transaction=False)
-            for span in spans:
-                event = self._span_to_event(span)
-                pipe.xadd(
-                    self._stream_key,
-                    event.to_redis_payload(),
-                    maxlen=self._max_stream_len,
-                    approximate=True,
-                )
-            pipe.execute()
-            return SpanExportResult.SUCCESS
+            published = all(self._publisher.publish(self._span_to_event(span)) for span in spans)
         except Exception:
-            return SpanExportResult.FAILURE
+            published = False
+        return SpanExportResult.SUCCESS if published else SpanExportResult.FAILURE
 
     def shutdown(self) -> None:
-        self._client.close()
+        if self._client is not None:
+            self._client.close()
 
     def _span_to_event(self, span: ReadableSpan) -> UnifiedEvent:
         attrs = dict(span.attributes or {})
 
-        # Extract token usage from span attributes (GenAI semantic conventions)
-        token_usage = None
-        if "gen_ai.usage.prompt_tokens" in attrs or "gen_ai.usage.input_tokens" in attrs:
-            prompt = attrs.get("gen_ai.usage.prompt_tokens", attrs.get("gen_ai.usage.input_tokens", 0))
-            completion = attrs.get("gen_ai.usage.completion_tokens", attrs.get("gen_ai.usage.output_tokens", 0))
-            token_usage = TokenUsage(
-                prompt_tokens=int(prompt),
-                completion_tokens=int(completion),
-                total_tokens=int(prompt) + int(completion),
+        prompt = int(
+            attrs.get("gen_ai.usage.prompt_tokens", attrs.get("gen_ai.usage.input_tokens", 0))
+        )
+        completion = int(
+            attrs.get(
+                "gen_ai.usage.completion_tokens",
+                attrs.get("gen_ai.usage.output_tokens", 0),
             )
+        )
+        name = span.name.lower()
+        failed = bool(span.status and span.status.status_code.name == "ERROR")
+        if failed:
+            event_type, status = EventType.ERROR, EventStatus.FAILED
+        elif "tool" in name:
+            event_type, status = EventType.TOOL_CALL, EventStatus.SUCCESS
+        elif "llm" in name or "gen_ai" in name:
+            event_type, status = EventType.LLM_CALL, EventStatus.SUCCESS
+        else:
+            event_type, status = EventType.FINISH, EventStatus.SUCCESS
 
-        return UnifiedEvent(
-            event_type=span.name,
+        trace_id = format(span.context.trace_id, "032x") if span.context else None
+        task_id = str(attrs.get("task.id") or trace_id or "unknown-task")
+
+        values = dict(
             agent_id=str(attrs.get("agent.id", attrs.get("resource.agent.id", "unknown"))),
-            agent_name=str(attrs.get("agent.name", "")),
-            framework="otel",
-            model=str(attrs.get("gen_ai.request.model", attrs.get("llm.model_name", ""))),
-            task_id=str(attrs.get("task.id", "")),
-            token_usage=token_usage,
+            framework=Framework(str(attrs.get("agent.framework", "langchain"))),
+            parent_agent_id=attrs.get("parent_agent.id"),
+            task_id=task_id,
+            team_id=str(attrs.get("team.id", "default")),
+            status=status,
+            event_type=event_type,
+            tokens_in=prompt,
+            tokens_out=completion,
+            cost_usd=float(attrs.get("gen_ai.usage.cost", 0.0)),
             payload={
+                "operation": span.name,
+                "agent_name": str(attrs.get("agent.name", "")),
+                "model": str(attrs.get("gen_ai.request.model", attrs.get("llm.model_name", ""))),
                 "span_id": format(span.context.span_id, "016x") if span.context else "",
-                "trace_id": format(span.context.trace_id, "032x") if span.context else "",
                 "status": span.status.status_code.name if span.status else "UNSET",
                 "duration_ms": (
                     (span.end_time - span.start_time) / 1e6
@@ -93,3 +105,6 @@ class RedisStreamExporter(SpanExporter):
                 "attributes": attrs,
             },
         )
+        if trace_id:
+            values["trace_id"] = trace_id
+        return UnifiedEvent(**values)
