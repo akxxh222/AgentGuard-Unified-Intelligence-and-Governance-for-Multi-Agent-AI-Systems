@@ -9,8 +9,8 @@ from app.core.log_normalizer import LogNormalizer
 
 log = logging.getLogger(__name__)
 class EventBus:
-    def __init__(self, store) -> None:
-        self.store = store; self._redis = None; self._task = None; self._running = False; self._normalizer = LogNormalizer()
+    def __init__(self, store, anomaly_engine) -> None:
+        self.store = store; self.anomaly_engine = anomaly_engine; self._redis = None; self._task = None; self._running = False; self._normalizer = LogNormalizer()
     async def start(self) -> None:
         try:
             self._redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False, socket_connect_timeout=2)
@@ -49,5 +49,8 @@ class EventBus:
             data = event.model_dump(mode="json"); await ws_manager.broadcast("events", "agent_event", data)
             if event.status.value in {"failed", "quarantined"} or event.event_type.value == "error":
                 alert = await self.store.add_alert(event)
+                await ws_manager.broadcast("alerts", "alert", alert)
+            for finding in self.anomaly_engine.evaluate(event):
+                alert = await self.store.add_detector_alert(event, finding)
                 await ws_manager.broadcast("alerts", "alert", alert)
         await self._redis.xack(settings.REDIS_STREAM_KEY, settings.REDIS_CONSUMER_GROUP, message_id)

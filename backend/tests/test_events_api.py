@@ -34,3 +34,21 @@ def test_failed_event_creates_retrievable_alert():
 def test_event_limit_is_validated():
     with client() as api:
         assert api.get("/events?limit=501").status_code == 422
+
+def test_five_consecutive_tool_calls_create_exactly_one_loop_alert():
+    with client() as api:
+        for index in range(5):
+            event = {
+                **VALID_EVENT,
+                "event_id": f"loop-{index}",
+                "agent_id": "looping-agent",
+                "trace_id": "loop-trace",
+                "event_type": "tool_call",
+                "payload": {"tool": "retry_compile"},
+            }
+            assert api.post("/events", json=event).status_code == 201
+
+        alerts = api.get("/alerts?limit=100").json()
+        loop_alerts = [alert for alert in alerts if alert.get("detector") == "loop_detector"]
+        assert len(loop_alerts) == 1
+        assert loop_alerts[0]["details"]["iterations"] == 5

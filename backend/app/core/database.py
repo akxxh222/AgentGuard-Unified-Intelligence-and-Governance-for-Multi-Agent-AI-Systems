@@ -23,6 +23,19 @@ class StateStore:
             alert = {"alert_id": event.event_id, "event_id": event.event_id, "agent_id": event.agent_id, "status": event.status.value, "event_type": event.event_type.value, "timestamp": event.timestamp, "trace_id": event.trace_id, "payload": event.payload}
             self._alerts.setdefault(event.event_id, alert)
             return self._alerts[event.event_id].copy()
+    async def add_detector_alert(self, event: Event, finding: dict) -> dict:
+        """Persist a detector finding using the triggering event as provenance."""
+        async with self._lock:
+            detector = str(finding.get("detector", "anomaly"))
+            alert_id = f"{event.event_id}:{detector}"
+            alert = {
+                "alert_id": alert_id, "event_id": event.event_id,
+                "agent_id": event.agent_id, "status": event.status.value,
+                "event_type": event.event_type.value, "timestamp": event.timestamp,
+                "trace_id": event.trace_id, **finding,
+            }
+            self._alerts.setdefault(alert_id, alert)
+            return self._alerts[alert_id].copy()
     async def recent_alerts(self, limit: int):
         return sorted(self._alerts.values(), key=lambda alert: alert["timestamp"], reverse=True)[:limit]
     async def list_escalations(self, status=None, limit=100, offset=0):

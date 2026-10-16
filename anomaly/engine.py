@@ -24,7 +24,7 @@ class AnomalyEngine:
         cfg = config or {}
         self._detectors = [
             TokenSpikeDetector(multiplier=cfg.get("token_spike_multiplier", 3.0)),
-            LoopDetector(max_iterations=cfg.get("loop_max_iterations", 10)),
+            LoopDetector(max_iterations=cfg.get("loop_max_iterations", 5)),
             SilentFailureDetector(timeout_seconds=cfg.get("silent_failure_timeout", 30)),
             SemanticChecker(
                 ollama_base_url=cfg.get("ollama_base_url", "http://localhost:11434"),

@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
                 confirmed = len(matches) == 1
         except RuntimeError as exc:
             error = str(exc)
-    identities = ", ".join(f"{e['agent_name']} ({e['framework']})" for e in events if e["event_type"] == "start")
+    identities = ", ".join(f"{e['payload']['agent_name']} ({e['framework']})" for e in events if e["event_type"] == "start")
     print(f"Events: generated={len(events)} submitted={submitted}")
     print(f"Agents: {identities}")
     print(f"Loop injected: {'yes' if args.inject_loop else 'no'}")

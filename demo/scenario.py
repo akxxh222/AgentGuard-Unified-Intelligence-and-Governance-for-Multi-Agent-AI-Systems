@@ -13,7 +13,7 @@ BASE_TIME = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 def _event(run_id: str, sequence: int, **values: Any) -> dict[str, Any]:
     event = {
         "event_id": str(uuid5(NAMESPACE_URL, f"agentguard:{run_id}:{sequence}")),
-        "ts": (BASE_TIME + timedelta(milliseconds=sequence * 100)).isoformat().replace("+00:00", "Z"),
+        "timestamp": (BASE_TIME + timedelta(milliseconds=sequence * 100)).isoformat().replace("+00:00", "Z"),
         **values,
     }
     validate_event(event)
@@ -23,8 +23,8 @@ def _event(run_id: str, sequence: int, **values: Any) -> dict[str, Any]:
 def validate_event(event: dict[str, Any]) -> None:
     """Validate the fields required by the AgentGuard demo contract."""
     required = {
-        "event_id", "event_type", "agent_id", "agent_name", "framework",
-        "trace_id", "task_id", "team_id", "payload", "ts",
+        "event_id", "event_type", "agent_id", "framework", "status",
+        "trace_id", "task_id", "team_id", "payload", "timestamp",
     }
     missing = required.difference(event)
     if missing:
@@ -33,9 +33,9 @@ def validate_event(event: dict[str, Any]) -> None:
         raise ValueError(f"unsupported framework: {event['framework']}")
     if not isinstance(event["payload"], dict):
         raise ValueError("payload must be an object")
-    parsed = datetime.fromisoformat(event["ts"].replace("Z", "+00:00"))
+    parsed = datetime.fromisoformat(event["timestamp"].replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
-        raise ValueError("ts must be a UTC timestamp")
+        raise ValueError("timestamp must be a UTC timestamp")
 
 
 def build_events(inject_loop: bool = False, run_id: str | None = None) -> list[dict[str, Any]]:
@@ -62,5 +62,16 @@ def build_events(inject_loop: bool = False, run_id: str | None = None) -> list[d
         dict(event_type="tool_call", agent_id="writer-01", agent_name="ReleaseWriter", framework="crewai", trace_id=trace_id, task_id="task-write", team_id=team_id, parent_agent_id="researcher-01", payload={"tool": "format_markdown", "style": "concise"}),
         dict(event_type="finish", agent_id="writer-01", agent_name="ReleaseWriter", framework="crewai", trace_id=trace_id, task_id="task-write", team_id=team_id, parent_agent_id="researcher-01", payload={"result": "summary-ready"}),
     ])
-    return [_event(run_id, index, **spec) for index, spec in enumerate(specs)]
+    events = []
+    for index, spec in enumerate(specs):
+        spec = dict(spec)
+        agent_name = spec.pop("agent_name")
+        tokens = spec.pop("tokens", {})
+        spec["status"] = "failed" if spec["event_type"] == "error" else ("success" if spec["event_type"] == "finish" else "running")
+        spec["tokens_in"] = tokens.get("prompt", 0)
+        spec["tokens_out"] = tokens.get("completion", 0)
+        spec.setdefault("cost_usd", 0.0)
+        spec["payload"] = {"agent_name": agent_name, **spec["payload"]}
+        events.append(_event(run_id, index, **spec))
+    return events
 

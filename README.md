@@ -34,7 +34,7 @@ See [architecture.md](architecture.md) for the component boundaries, message con
 
 ## Current Status
 
-The `mem1` branch contains the canonical schema, publishing boundary, shared trace and cost context, and adapters for LangChain, AutoGen, and CrewAI. The submission scope intentionally excludes hosted persistence, semantic LLM analysis, HITL workflows, and advanced orchestration.
+The integrated MVP includes framework adapters, a FastAPI collector, deterministic loop alerts, Redis transport, a multi-page Next.js dashboard, and a reproducible three-agent demo. The submission scope intentionally excludes hosted persistence, semantic LLM analysis, HITL workflows, and active quarantine commands.
 
 See the project roadmap in the repository documentation. The local `milestones.md` file contains the time-boxed team plan and is intentionally ignored by Git.
 
@@ -45,8 +45,14 @@ Python 3.11 or newer is recommended.
 ```bash
 python -m pip install -r adapters/requirements.txt
 python -m pip install -r anomaly/requirements.txt
-python -m pytest adapters/tests anomaly/tests -v
+python -m pip install -r backend/requirements.txt
+python -m pytest adapters/tests anomaly/tests demo/tests -q
+
+cd backend
+uvicorn app.main:app --reload
 ```
+
+In another terminal run `npm install && npm run dev` from `frontend/`. From the repository root, `python -m demo.run --inject-loop` submits the deterministic workflow and verifies that exactly one loop alert was created.
 
 Minimal in-memory event example:
 

@@ -18,6 +18,9 @@ async def ingest_event(event: Event, request: Request):
         if is_alert(event):
             alert = await request.app.state.store.add_alert(event)
             await ws_manager.broadcast("alerts", "alert", alert)
+        for finding in request.app.state.anomaly_engine.evaluate(event):
+            alert = await request.app.state.store.add_detector_alert(event, finding)
+            await ws_manager.broadcast("alerts", "alert", alert)
     return {"accepted": inserted, "event": data}
 
 @router.get("")

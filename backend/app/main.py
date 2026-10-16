@@ -7,12 +7,13 @@ from app.api.websocket.events import alerts_endpoint, events_endpoint
 from app.api.websocket.manager import ws_manager
 from app.config import settings
 from app.core.cost_tracker import CostTracker
+from app.core.anomaly_engine import AnomalyEngine
 from app.core.database import StateStore
 from app.core.event_bus import EventBus
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.settings = settings; app.state.store = StateStore(); app.state.cost_tracker = CostTracker(app.state.store); app.state.event_bus = EventBus(app.state.store)
+    app.state.settings = settings; app.state.store = StateStore(); app.state.anomaly_engine = AnomalyEngine(); app.state.cost_tracker = CostTracker(app.state.store); app.state.event_bus = EventBus(app.state.store, app.state.anomaly_engine)
     await app.state.event_bus.start()
     try: yield
     finally: await app.state.event_bus.stop(); await ws_manager.close()
