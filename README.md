@@ -76,6 +76,23 @@ cd frontend && npm run build
 
 The pytest command requires the component requirements. Frontend setup uses `npm install` in `frontend/`.
 
+### Frontend dashboard
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The dashboard starts in clearly labeled **Demo Mode**, which uses deterministic local synthetic data. Switch to **Live** in the header or Settings to poll `GET /health`, `GET /events`, and `GET /alerts` every two seconds. Configure the collector before starting Next.js:
+
+```bash
+$env:NEXT_PUBLIC_API_URL="http://localhost:8000"
+npm run dev
+```
+
+Live Mode never substitutes demo data after a failure. The current backend implements `/health` but does not yet implement `/events` or `/alerts`; those capabilities display explicit unavailable states. Validate a release build with `npm run build`.
+
 ## Repository structure
 
 - `demo/` — deterministic event scenario, HTTP client, and tests.
