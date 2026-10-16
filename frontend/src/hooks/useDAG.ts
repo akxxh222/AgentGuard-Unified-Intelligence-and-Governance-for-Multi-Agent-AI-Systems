@@ -1,58 +1,49 @@
-/**
- * useDAG — derives React Flow nodes and edges from the Zustand agent store.
- */
 "use client";
 
 import { useMemo } from "react";
-import type { Node, Edge } from "reactflow";
+import type { Node, Edge } from "@xyflow/react";
 import { useAgentStore } from "@/store/agentStore";
 
-const FRAMEWORK_COLORS: Record<string, string> = {
-  langchain: "#6366f1",
-  autogen: "#10b981",
-  crewai: "#f59e0b",
-  custom: "#94a3b8",
-};
-
 export function useDAG() {
-  const { agents, events } = useAgentStore();
+  const agents = useAgentStore((s) => s.agents);
+  const events = useAgentStore((s) => s.events);
 
   const nodes: Node[] = useMemo(
     () =>
       agents.map((agent, i) => ({
-        id: agent.id,
+        id: agent.agent_id,
         type: "agentNode",
-        position: { x: (i % 4) * 220, y: Math.floor(i / 4) * 180 },
+        position: { x: (i % 3) * 240, y: Math.floor(i / 3) * 160 },
         data: {
-          id: agent.id,
-          label: agent.name,
+          id: agent.agent_id,
+          label: agent.agent_name || agent.agent_id,
           framework: agent.framework,
           status: agent.status,
-          color: FRAMEWORK_COLORS[agent.framework] ?? "#6366f1",
         },
       })),
     [agents]
   );
 
   const edges: Edge[] = useMemo(() => {
-    // Build edges from event pairs (source → target based on task chains)
     const seen = new Set<string>();
     const result: Edge[] = [];
+
     for (const e of events) {
-      if (!e.agent_id || !e.task_id) continue;
-      const id = `${e.agent_id}-${e.task_id}`;
+      if (!e.parent_agent_id) continue;
+      const id = `${e.parent_agent_id}->${e.agent_id}`;
       if (!seen.has(id)) {
         seen.add(id);
         result.push({
           id,
-          source: e.agent_id,
-          target: e.task_id,
-          label: e.event_type,
-          animated: true,
+          source: e.parent_agent_id,
+          target: e.agent_id,
+          label: `${e.tokens_in + e.tokens_out} tok`,
+          animated: e.status === "running",
         });
       }
     }
-    return result.slice(0, 50);
+
+    return result.slice(0, 100);
   }, [events]);
 
   return { nodes, edges };

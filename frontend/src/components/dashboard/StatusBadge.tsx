@@ -8,6 +8,10 @@ const CONFIG: Record<AgentStatus, { label: string; classes: string }> = {
   running: { label: "Running", classes: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" },
   error: { label: "Error", classes: "bg-red-500/10 text-red-400 border-red-500/20" },
   completed: { label: "Done", classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
+  success: { label: "Success", classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
+  failed: { label: "Failed", classes: "bg-red-500/10 text-red-400 border-red-500/20" },
+  paused: { label: "Paused", classes: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" },
+  quarantined: { label: "Quarantined", classes: "bg-red-500/10 text-red-400 border-red-500/20" },
 };
 
 interface Props {

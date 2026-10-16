@@ -1,43 +1,30 @@
-/**
- * REST API client — thin wrapper around fetch.
- */
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    ...init,
-  });
-  if (!res.ok) {
-    throw new Error(`API ${res.status}: ${path}`);
-  }
-  return res.json() as Promise<T>;
-}
-
-import type { Agent, Task, CostSummary, Escalation } from "./types";
-
+import type { Agent, AgentEvent, AnomalyAlert, CostSummary, Escalation, Framework, Task } from "./types";
+import type { AgentSummary as CoreAgentSummary, Alert as CoreAlert, CostAttribution, Escalation as CoreEscalation, AgentEvent as CoreAgentEvent } from "@/types";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export class ApiError extends Error { constructor(message: string, public status?: number) { super(message); } }
+async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> { let response: Response; try { response = await fetch(`${API_URL}${path}`, { ...init, signal, headers: { "Content-Type": "application/json", ...init?.headers }, cache: "no-store" }); } catch (error) { if (error instanceof DOMException && error.name === "AbortError") throw error; throw new ApiError(`Collector unreachable at ${API_URL}`); } if (!response.ok) throw new ApiError(`${path} returned HTTP ${response.status}`, response.status); return response.json() as Promise<T>; }
+const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
+const text = (value: unknown, fallback = "") => typeof value === "string" ? value : fallback;
+const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
+export function normalizeEvent(value: unknown, index = 0): AgentEvent { const raw = record(value); const payload = record(raw.payload); const usage = record(raw.tokens ?? raw.usage ?? payload.usage); const eventType = text(raw.event_type, "unknown"); const timestamp = text(raw.timestamp ?? raw.ts, new Date(0).toISOString()); const status = text(raw.status, eventType === "error" ? "failed" : eventType === "finish" ? "success" : "running") as AgentEvent["status"]; const tokensIn = number(raw.tokens_in ?? usage.prompt ?? usage.prompt_tokens); const tokensOut = number(raw.tokens_out ?? usage.completion ?? usage.completion_tokens); return { event_id: text(raw.event_id ?? raw.id, `event-${index}`), agent_id: text(raw.agent_id, "unknown-agent"), agent_name: text(raw.agent_name) || undefined, framework: text(raw.framework, "custom") as Framework, parent_agent_id: text(raw.parent_agent_id) || null, task_id: text(raw.task_id, "unassigned"), team_id: text(raw.team_id, "unassigned"), status, event_type: eventType, tokens_in: tokensIn, tokens_out: tokensOut, cost_usd: number(raw.cost_usd ?? usage.cost_usd), timestamp, trace_id: text(raw.trace_id, "untracked"), payload, id: text(raw.event_id ?? raw.id, `event-${index}`), ts: timestamp, tokens: { prompt: tokensIn, completion: tokensOut, total: number(usage.total ?? usage.total_tokens) || tokensIn + tokensOut } }; }
+export function normalizeAlert(value: unknown, index = 0): AnomalyAlert { const raw = record(value); const details = record(raw.details); const timestamp = text(raw.timestamp ?? raw.ts ?? raw.created_at, new Date(0).toISOString()); const detector = text(raw.detector ?? raw.type, "unknown_detector"); return { alert_id: text(raw.alert_id ?? raw.id, `alert-${index}`), detector, agent_id: text(raw.agent_id, "unknown-agent"), severity: text(raw.severity, "medium") as AnomalyAlert["severity"], description: text(raw.description ?? raw.reason ?? details.reason, detector.replaceAll("_", " ")), timestamp, trace_id: text(raw.trace_id ?? details.trace_id) || undefined, task_id: text(raw.task_id ?? details.task_id) || undefined, details, ts: timestamp }; }
+function unwrap(value: unknown, key: string): unknown[] { if (Array.isArray(value)) return value; const body = record(value); return Array.isArray(body[key]) ? body[key] as unknown[] : []; }
+export async function fetchCollector(signal: AbortSignal) { const [health, eventResult, alertResult] = await Promise.allSettled([request<unknown>("/health", signal), request<unknown>("/events", signal), request<unknown>("/alerts", signal)]); return { health, events: eventResult.status === "fulfilled" ? unwrap(eventResult.value, "events").map(normalizeEvent) : eventResult, alerts: alertResult.status === "fulfilled" ? unwrap(alertResult.value, "alerts").map(normalizeAlert) : alertResult }; }
 export const api = {
-  agents: {
-    list: () => request<Agent[]>("/api/v1/agents"),
-    get: (id: string) => request<Agent>(`/api/v1/agents/${id}`),
-  },
-  tasks: {
-    list: (params?: { agent_id?: string; status?: string }) => {
-      const qs = new URLSearchParams(params as Record<string, string>).toString();
-      return request<Task[]>(`/api/v1/tasks${qs ? `?${qs}` : ""}`);
-    },
-  },
-  costs: {
-    summary: () => request<CostSummary>("/api/v1/costs"),
-    byAgent: (id: string) => request<CostSummary>(`/api/v1/costs/${id}`),
-  },
-  escalations: {
-    list: () => request<Escalation[]>("/api/v1/escalations"),
-    resolve: (id: string, action: string, notes?: string) =>
-      request(`/api/v1/escalations/${id}/resolve`, {
-        method: "POST",
-        body: JSON.stringify({ action, notes }),
-      }),
-  },
+  getHealth: () => request<{ status: string; version?: string }>("/health"),
+  getEvents: () => request<CoreAgentEvent[]>("/events"),
+  getAlerts: () => request<CoreAlert[]>("/alerts"),
+  getAgents: () => request<CoreAgentSummary[]>("/agents"),
+  getAgentById: (id: string) => request<CoreAgentSummary>(`/agents/${encodeURIComponent(id)}`),
+  getCosts: (groupBy: "agent" | "team" | "task" = "agent") => request<CostAttribution[]>(`/costs?group_by=${groupBy}`),
+  getAlertById: (id: string) => request<CoreAlert>(`/alerts/${encodeURIComponent(id)}`),
+  getEscalations: () => request<CoreEscalation[]>("/escalations"),
+  approveEscalation: (id: string, note?: string) => request<{ success: boolean }>(`/escalations/${encodeURIComponent(id)}/approve`, undefined, { method: "POST", body: JSON.stringify({ note }) }),
+  rejectEscalation: (id: string, reason?: string) => request<{ success: boolean }>(`/escalations/${encodeURIComponent(id)}/reject`, undefined, { method: "POST", body: JSON.stringify({ reason }) }),
+  getTraces: () => request<Array<{ trace_id: string; root_agent: string; total_cost: number; duration_ms: number; started_at: string }>>("/traces"),
+  getTraceEvents: (traceId: string) => request<CoreAgentEvent[]>(`/traces/${encodeURIComponent(traceId)}/events`),
+  agents: { list: () => request<Agent[]>("/api/v1/agents"), get: (id: string) => request<Agent>(`/api/v1/agents/${id}`) },
+  tasks: { list: (params?: { agent_id?: string; status?: string }) => request<Task[]>(`/api/v1/tasks${params ? `?${new URLSearchParams(params as Record<string, string>)}` : ""}`) },
+  costs: { summary: () => request<CostSummary>("/api/v1/costs"), byAgent: (id: string) => request<CostSummary>(`/api/v1/costs/${id}`) },
+  escalations: { list: () => request<Escalation[]>("/api/v1/escalations"), resolve: (id: string, action: string, notes?: string) => request(`/api/v1/escalations/${id}/resolve`, undefined, { method: "POST", body: JSON.stringify({ action, notes }) }) },
 };

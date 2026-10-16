@@ -1,49 +1,20 @@
-"""
-Escalation routes — surface anomaly alerts for human review.
-"""
-from uuid import UUID
-
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from supabase import create_client
-
-from app.config import settings
-
+from fastapi import APIRouter, HTTPException, Request, Query
+from pydantic import BaseModel, Field
+from app.api.websocket.manager import ws_manager
 router = APIRouter()
-_sb = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
-
-
-class ResolvePayload(BaseModel):
-    action: str  # approve | reject | snooze
-    notes: str | None = None
-
-
+class Decision(BaseModel): comment: str | None = Field(default=None, max_length=2000)
 @router.get("")
-async def list_escalations(status: str = "pending"):
-    return (
-        _sb.table("escalations")
-        .select("*")
-        .eq("status", status)
-        .order("created_at", desc=True)
-        .execute()
-        .data
-    )
-
-
-@router.post("/{escalation_id}/resolve")
-async def resolve_escalation(escalation_id: UUID, payload: ResolvePayload):
-    result = (
-        _sb.table("escalations")
-        .update(
-            {
-                "status": "resolved",
-                "resolved_by": payload.action,
-                "notes": payload.notes,
-            }
-        )
-        .eq("id", str(escalation_id))
-        .execute()
-    )
-    if not result.data:
-        raise HTTPException(status_code=404, detail="Escalation not found")
-    return result.data[0]
+async def list_escalations(request: Request, status: str | None = None, limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)): return await request.app.state.store.list_escalations(status, limit, offset)
+async def decide(escalation_id: str, payload: Decision, request: Request, decision: str):
+    row = await request.app.state.store.decide(escalation_id, decision, payload.comment)
+    if row is None: raise HTTPException(404, "Escalation not found")
+    if row is False: raise HTTPException(409, "Escalation has already been decided")
+    bus = getattr(request.app.state, "event_bus", None)
+    if bus and bus._redis:
+        try: await bus._redis.xadd(request.app.state.settings.REDIS_COMMAND_STREAM, {"type": "escalation_decision", "escalation_id": escalation_id, "decision": decision})
+        except Exception: pass
+    await ws_manager.broadcast("alerts", "escalation_update", row); return row
+@router.post("/{escalation_id}/approve")
+async def approve(escalation_id: str, payload: Decision, request: Request): return await decide(escalation_id, payload, request, "approved")
+@router.post("/{escalation_id}/reject")
+async def reject(escalation_id: str, payload: Decision, request: Request): return await decide(escalation_id, payload, request, "rejected")

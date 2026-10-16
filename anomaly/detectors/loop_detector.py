@@ -40,7 +40,7 @@ class LoopDetector:
         counts = self._counters[agent_id]
         counts[tool] = counts.get(tool, 0) + 1
 
-        if counts[tool] >= self._max:
+        if counts[tool] == self._max:
             return {
                 "detector": "loop_detector",
                 "agent_id": agent_id,

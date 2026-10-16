@@ -2,7 +2,14 @@
 Settings loaded from environment variables (Pydantic v2).
 Uses Supabase instead of a local PostgreSQL instance.
 """
-from pydantic_settings import BaseSettings, SettingsConfigDict
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:  # Allows the lightweight API/test runtime to start without the optional package.
+    from pydantic import BaseModel
+    class BaseSettings(BaseModel):
+        pass
+    def SettingsConfigDict(**kwargs):
+        return kwargs
 
 
 class Settings(BaseSettings):
@@ -28,7 +35,10 @@ class Settings(BaseSettings):
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379"
-    REDIS_STREAM_KEY: str = "agent_events"
+    REDIS_STREAM_KEY: str = "agent.events"
+    REDIS_ALERT_STREAM: str = "agent.alerts"
+    REDIS_COMMAND_STREAM: str = "agent.commands"
+    REDIS_DEAD_LETTER_STREAM: str = "agent.events.invalid"
     REDIS_CONSUMER_GROUP: str = "backend_consumers"
     REDIS_CONSUMER_NAME: str = "backend_0"
 

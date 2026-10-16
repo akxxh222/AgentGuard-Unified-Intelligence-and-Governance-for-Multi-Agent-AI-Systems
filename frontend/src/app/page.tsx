@@ -1,57 +1,20 @@
 "use client";
+import { useMemo, useState } from "react";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useAgentData } from "@/hooks/useAgentData";
+import { deriveAgents, formatNumber, formatUsd, safeTime } from "@/lib/derive";
+import type { AgentEvent, AgentSummary, AnomalyAlert } from "@/lib/types";
+import { AgentDrawer, AlertDrawer, EventDrawer } from "@/components/details";
+import { EmptyState, FrameworkBadge, Panel, SeverityBadge, StatusBadge } from "@/components/ui";
 
-import AgentGraph from "@/components/dag/AgentGraph";
-import AgentTable from "@/components/dashboard/AgentTable";
-import CostPanel from "@/components/dashboard/CostPanel";
-import AlertFeed from "@/components/alerts/AlertFeed";
-import EscalationQueue from "@/components/escalation/EscalationQueue";
-import { useAgentStream } from "@/hooks/useAgentStream";
-
-export default function DashboardPage() {
-  useAgentStream(); // Connect WebSocket and populate Zustand store
-
-  return (
-    <main className="min-h-screen bg-[#0a0a0f] text-slate-100 p-4">
-      {/* Header */}
-      <header className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold text-sm">
-            ACT
-          </div>
-          <h1 className="text-xl font-semibold tracking-tight">Agent Control Tower</h1>
-        </div>
-        <span className="text-xs text-green-400 bg-green-400/10 px-3 py-1 rounded-full border border-green-400/20">
-          ● Live
-        </span>
-      </header>
-
-      {/* Main grid */}
-      <div className="grid grid-cols-12 gap-4">
-        {/* DAG — full width */}
-        <section className="col-span-12 lg:col-span-8 h-96 rounded-xl border border-[#1e1e2e] bg-[#111118] overflow-hidden">
-          <AgentGraph />
-        </section>
-
-        {/* Cost panel */}
-        <section className="col-span-12 lg:col-span-4 rounded-xl border border-[#1e1e2e] bg-[#111118] p-4">
-          <CostPanel />
-        </section>
-
-        {/* Agent table */}
-        <section className="col-span-12 lg:col-span-8 rounded-xl border border-[#1e1e2e] bg-[#111118] p-4">
-          <AgentTable />
-        </section>
-
-        {/* Alert feed */}
-        <section className="col-span-12 lg:col-span-4 rounded-xl border border-[#1e1e2e] bg-[#111118] p-4">
-          <AlertFeed />
-        </section>
-
-        {/* Escalation queue — full width */}
-        <section className="col-span-12 rounded-xl border border-[#1e1e2e] bg-[#111118] p-4">
-          <EscalationQueue />
-        </section>
-      </div>
-    </main>
-  );
+export default function OverviewPage() { const { events, alerts, mode } = useAgentData(); const agents = useMemo(() => deriveAgents(events), [events]); const [event, setEvent] = useState<AgentEvent | null>(null); const [alert, setAlert] = useState<AnomalyAlert | null>(null); const [agent, setAgent] = useState<AgentSummary | null>(null);
+  const totals = useMemo(() => ({ tokens: events.reduce((sum,e)=>sum+e.tokens_in+e.tokens_out,0), cost: events.reduce((sum,e)=>sum+e.cost_usd,0), active: agents.filter((a)=>a.status==="running").length }), [events,agents]);
+  const volume = useMemo(() => events.map((e,i)=>({ time:safeTime(e.timestamp), events:i+1, cost:+events.slice(0,i+1).reduce((s,x)=>s+x.cost_usd,0).toFixed(6) })),[events]);
+  const costByAgent = agents.map((a)=>({ name:a.name.split(" ")[0], cost:+a.totalCost.toFixed(6) }));
+  const metrics = [["Total agents",agents.length,"Across 3 frameworks"],["Active agents",totals.active,"Currently running"],["Total events",events.length,"Canonical telemetry"],["Active anomalies",alerts.length,mode==="demo"?"Synthetic findings":"Collector findings"],["Total token usage",formatNumber(totals.tokens),"Input + output"],["Estimated cost",formatUsd(totals.cost),"Event-level values"]];
+  return <><div className="metric-grid">{metrics.map(([label,value,meta])=><article className="metric-card" key={label}><span className="metric-label">{label}</span><strong className="metric-value">{value}</strong><div className="metric-meta"><span>{meta}</span></div></article>)}</div>
+    <div className="overview-grid"><div className="stack"><Panel title="Agent status"><div className="table-wrap">{agents.length?<table className="data-table"><thead><tr><th>Agent</th><th>Framework</th><th>Status</th><th>Team / Task</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>{agents.map((a)=><tr key={a.id} onClick={()=>setAgent(a)} tabIndex={0} onKeyDown={(e)=>e.key==="Enter"&&setAgent(a)}><td className="primary-cell">{a.name}<span className="secondary mono">{a.id}</span></td><td><FrameworkBadge framework={a.framework}/></td><td><StatusBadge status={a.status}/></td><td>{a.teamId}<span className="secondary mono">{a.taskId}</span></td><td>{formatNumber(a.totalTokens)}</td><td>{formatUsd(a.totalCost)}</td></tr>)}</tbody></table>:<EmptyState title="No agents observed" detail="Events from the selected data source will populate this registry."/>}</div></Panel>
+      <div className="split"><Panel title="Event volume"><div className="chart-wrap"><ResponsiveContainer><AreaChart data={volume}><defs><linearGradient id="eventFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#818cf8" stopOpacity={.35}/><stop offset="1" stopColor="#818cf8" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#1c2636" vertical={false}/><XAxis dataKey="time" tick={{fill:"#65748b",fontSize:9}} axisLine={false} tickLine={false}/><YAxis tick={{fill:"#65748b",fontSize:9}} axisLine={false} tickLine={false}/><Tooltip contentStyle={{background:"#0c111a",border:"1px solid #253044",fontSize:11}}/><Area type="monotone" dataKey="events" stroke="#818cf8" fill="url(#eventFill)" strokeWidth={2}/></AreaChart></ResponsiveContainer></div></Panel><Panel title="Cost by agent"><div className="chart-wrap"><ResponsiveContainer><BarChart data={costByAgent}><CartesianGrid stroke="#1c2636" vertical={false}/><XAxis dataKey="name" tick={{fill:"#65748b",fontSize:9}} axisLine={false}/><YAxis tick={{fill:"#65748b",fontSize:9}} axisLine={false} tickFormatter={(v)=>`$${v}`}/><Tooltip contentStyle={{background:"#0c111a",border:"1px solid #253044",fontSize:11}} formatter={(v:number)=>formatUsd(v)}/><Bar dataKey="cost" fill="#22d3ee" radius={[3,3,0,0]}/></BarChart></ResponsiveContainer></div></Panel></div></div>
+      <div className="stack"><Panel title="Recent alerts">{alerts.length?<div className="alert-list">{alerts.slice(0,5).map((a)=><button className="alert-row" key={a.alert_id} onClick={()=>setAlert(a)}><SeverityBadge severity={a.severity}/><div><h3>{a.detector.replaceAll("_"," ")}</h3><p>{a.description}</p></div><time>{safeTime(a.timestamp)}</time></button>)}</div>:<EmptyState title="No active anomalies" detail="Detector findings will appear here."/>}</Panel><Panel title="Recent events">{events.length?<div className="event-list">{[...events].reverse().slice(0,8).map((e)=><button className="event-row" key={e.event_id} onClick={()=>setEvent(e)}><span className="event-dot"/><time>{safeTime(e.timestamp)}</time><FrameworkBadge framework={e.framework}/><div className="event-main"><strong>{e.event_type}</strong><span>{e.agent_name??e.agent_id} · {e.task_id}</span></div><StatusBadge status={e.status}/></button>)}</div>:<EmptyState title="No events received" detail="Switch to Demo Mode or connect a collector implementing GET /events."/>}</Panel></div></div>
+    <EventDrawer event={event} onClose={()=>setEvent(null)}/><AlertDrawer alert={alert} events={events} onClose={()=>setAlert(null)}/><AgentDrawer agent={agent} events={events} alerts={alerts} onClose={()=>setAgent(null)}/></>;
 }
