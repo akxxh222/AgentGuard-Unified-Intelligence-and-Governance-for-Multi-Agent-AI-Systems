@@ -1,71 +1,98 @@
-/**
- * Zustand global store — single source of truth for all agent state.
- */
 import { create } from "zustand";
-import type { Agent, AgentEvent, AnomalyAlert, CostSummary, Escalation, Task } from "@/lib/types";
+import type {
+  AgentEvent,
+  Alert,
+  Escalation,
+  AgentSummary,
+  CostAttribution,
+} from "@/types";
 
-interface AgentStore {
-  // State
-  agents: Agent[];
-  tasks: Task[];
+interface AgentStoreState {
+  // Data
+  agents: AgentSummary[];
   events: AgentEvent[];
-  alerts: AnomalyAlert[];
-  costs: CostSummary | null;
+  alerts: Alert[];
   escalations: Escalation[];
-  connected: boolean;
+  costs: CostAttribution[];
+  selectedAgentId: string | null;
+  selectedTraceId: string | null;
+  isConnected: boolean;
 
-  // Setters
-  setAgents: (agents: Agent[]) => void;
-  upsertAgent: (agent: Agent) => void;
-  addTask: (task: Task) => void;
-  updateTask: (task: Partial<Task> & { id: string }) => void;
+  // Actions
+  setAgents: (agents: AgentSummary[]) => void;
+  upsertAgent: (agent: AgentSummary) => void;
   addEvent: (event: AgentEvent) => void;
-  addAlert: (alert: AnomalyAlert) => void;
-  setCosts: (costs: CostSummary) => void;
-  setEscalations: (esc: Escalation[]) => void;
-  resolveEscalation: (id: string) => void;
-  setConnected: (v: boolean) => void;
+  batchAddEvents: (events: AgentEvent[]) => void;
+  addAlert: (alert: Alert) => void;
+  setEscalations: (escalations: Escalation[]) => void;
+  resolveEscalation: (id: string, status: "approved" | "rejected") => void;
+  setCosts: (costs: CostAttribution[]) => void;
+  setSelectedAgentId: (id: string | null) => void;
+  setSelectedTraceId: (id: string | null) => void;
+  setIsConnected: (connected: boolean) => void;
 }
 
-export const useAgentStore = create<AgentStore>((set) => ({
+const MAX_EVENTS = 500;
+const MAX_ALERTS = 100;
+
+export const useAgentStore = create<AgentStoreState>((set) => ({
   agents: [],
-  tasks: [],
   events: [],
   alerts: [],
-  costs: null,
   escalations: [],
-  connected: false,
+  costs: [],
+  selectedAgentId: null,
+  selectedTraceId: null,
+  isConnected: false,
 
   setAgents: (agents) => set({ agents }),
 
   upsertAgent: (agent) =>
-    set((s) => ({
-      agents: s.agents.some((a) => a.id === agent.id)
-        ? s.agents.map((a) => (a.id === agent.id ? agent : a))
-        : [...s.agents, agent],
-    })),
-
-  addTask: (task) => set((s) => ({ tasks: [task, ...s.tasks].slice(0, 200) })),
-
-  updateTask: (update) =>
-    set((s) => ({
-      tasks: s.tasks.map((t) => (t.id === update.id ? { ...t, ...update } : t)),
-    })),
+    set((state) => {
+      const idx = state.agents.findIndex((a) => a.agent_id === agent.agent_id);
+      if (idx >= 0) {
+        const next = [...state.agents];
+        next[idx] = { ...next[idx], ...agent };
+        return { agents: next };
+      }
+      return { agents: [...state.agents, agent] };
+    }),
 
   addEvent: (event) =>
-    set((s) => ({ events: [event, ...s.events].slice(0, 500) })),
+    set((state) => ({
+      events: [event, ...state.events].slice(0, MAX_EVENTS),
+    })),
+
+  batchAddEvents: (newEvents) =>
+    set((state) => ({
+      events: [...newEvents, ...state.events].slice(0, MAX_EVENTS),
+    })),
 
   addAlert: (alert) =>
-    set((s) => ({ alerts: [alert, ...s.alerts].slice(0, 100) })),
-
-  setCosts: (costs) => set({ costs }),
+    set((state) => ({
+      alerts: [alert, ...state.alerts].slice(0, MAX_ALERTS),
+    })),
 
   setEscalations: (escalations) => set({ escalations }),
 
-  resolveEscalation: (id) =>
-    set((s) => ({
-      escalations: s.escalations.filter((e) => e.id !== id),
+  resolveEscalation: (id, status) =>
+    set((state) => ({
+      escalations: state.escalations.map((esc) =>
+        esc.escalation_id === id
+          ? {
+              ...esc,
+              status,
+              resolved_at: new Date().toISOString(),
+            }
+          : esc
+      ),
     })),
 
-  setConnected: (connected) => set({ connected }),
+  setCosts: (costs) => set({ costs }),
+
+  setSelectedAgentId: (selectedAgentId) => set({ selectedAgentId }),
+
+  setSelectedTraceId: (selectedTraceId) => set({ selectedTraceId }),
+
+  setIsConnected: (isConnected) => set({ isConnected }),
 }));

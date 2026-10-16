@@ -2,38 +2,103 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #0a0a0f;
-  --foreground: #e2e8f0;
-  --card: #111118;
-  --card-border: #1e1e2e;
-  --accent: #6366f1;
-  --accent-dim: #4f46e5;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  --muted: #94a3b8;
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.5rem;
+
+    /* Status Palette - Light */
+    --status-running: 158 64% 40%;
+    --status-alert: 38 92% 50%;
+    --status-quarantined: 0 72% 51%;
+    --status-escalating: 199 89% 48%;
+    --status-failed: 347 77% 50%;
+    --status-success: 158 30% 40%;
+    --status-idle: 240 5% 45%;
+
+    /* Framework Badges - Light */
+    --framework-langchain: 173 80% 36%;
+    --framework-autogen: 262 83% 52%;
+    --framework-crewai: 25 95% 48%;
+  }
+
+  .dark {
+    /* Air-traffic control room: zinc-950 background, zinc-900 surfaces, zinc-800 borders */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 6.5%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 6.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    /* Status Palette - Dark */
+    --status-running: 158 64% 52%;
+    --status-alert: 43 96% 56%;
+    --status-quarantined: 0 84% 60%;
+    --status-escalating: 199 89% 52%;
+    --status-failed: 347 77% 55%;
+    --status-success: 158 30% 45%;
+    --status-idle: 240 5% 65%;
+
+    /* Framework Badges - Dark */
+    --framework-langchain: 173 80% 42%;
+    --framework-autogen: 262 83% 62%;
+    --framework-crewai: 25 95% 55%;
+  }
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-zinc-800 selection:text-zinc-100;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: 'Inter', sans-serif;
-  -webkit-font-smoothing: antialiased;
+/* Subtle dot-grid for control room & lineage graph */
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 16px 16px;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--card); }
-::-webkit-scrollbar-thumb { background: var(--card-border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+.light .bg-dot-grid {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.08) 1px, transparent 1px);
+}
 
-/* React Flow overrides */
-.react-flow__background { background: var(--background) !important; }
-.react-flow__edge-path { stroke: var(--accent-dim); }
+/* Number stabilization */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

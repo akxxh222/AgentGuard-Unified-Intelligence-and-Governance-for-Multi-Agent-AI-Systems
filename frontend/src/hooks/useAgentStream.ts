@@ -1,75 +1,43 @@
-/**
- * useAgentStream — connects to the backend WebSocket and hydrates
- * the Zustand store with live events.
- */
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
+import { eventsWs, alertsWs } from "@/lib/ws";
 import { useAgentStore } from "@/store/agentStore";
-import type { WsMessage } from "@/lib/types";
+import type { AgentEvent, Alert, Escalation } from "@/types";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
-const RECONNECT_DELAY_MS = 3000;
-
+/**
+ * useAgentStream — routes WebSocket messages through src/lib/ws.ts into the Zustand store.
+ * Complies with the rule: Components never call WebSocket directly.
+ */
 export function useAgentStream() {
-  const wsRef = useRef<WebSocket | null>(null);
-  const { upsertAgent, addTask, updateTask, addEvent, addAlert, setCosts, setConnected } =
-    useAgentStore();
+  const addEvent = useAgentStore((s) => s.addEvent);
+  const addAlert = useAgentStore((s) => s.addAlert);
+  const setEscalations = useAgentStore((s) => s.setEscalations);
+  const escalations = useAgentStore((s) => s.escalations);
+  const setIsConnected = useAgentStore((s) => s.setIsConnected);
 
   useEffect(() => {
-    let cancelled = false;
+    setIsConnected(true);
 
-    function connect() {
-      if (cancelled) return;
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
+    const unsubEvents = eventsWs.subscribe((envelope) => {
+      if (envelope.type === "event") {
+        addEvent(envelope.data as AgentEvent);
+      }
+    });
 
-      ws.onopen = () => {
-        setConnected(true);
-      };
-
-      ws.onmessage = (ev) => {
-        try {
-          const msg: WsMessage = JSON.parse(ev.data);
-          switch (msg.type) {
-            case "agent.status":
-              upsertAgent(msg.data);
-              break;
-            case "task.created":
-              addTask(msg.data);
-              break;
-            case "task.completed":
-              updateTask(msg.data);
-              break;
-            case "event.raw":
-              addEvent(msg.data);
-              break;
-            case "anomaly.detected":
-              addAlert(msg.data);
-              break;
-            case "cost.update":
-              setCosts(msg.data);
-              break;
-          }
-        } catch {
-          // Malformed message — ignore
-        }
-      };
-
-      ws.onerror = () => setConnected(false);
-      ws.onclose = () => {
-        setConnected(false);
-        if (!cancelled) {
-          setTimeout(connect, RECONNECT_DELAY_MS);
-        }
-      };
-    }
-
-    connect();
+    const unsubAlerts = alertsWs.subscribe((envelope) => {
+      if (envelope.type === "alert") {
+        addAlert(envelope.data as Alert);
+      } else if (envelope.type === "escalation") {
+        const esc = envelope.data as Escalation;
+        setEscalations([esc, ...escalations]);
+      }
+    });
 
     return () => {
-      cancelled = true;
-      wsRef.current?.close();
+      unsubEvents();
+      unsubAlerts();
+      setIsConnected(false);
     };
-  }, [addAlert, addEvent, addTask, setCosts, setConnected, upsertAgent, updateTask]);
+  }, [addEvent, addAlert, setEscalations, escalations, setIsConnected]);
 }

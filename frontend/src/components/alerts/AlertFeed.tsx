@@ -1,26 +1,35 @@
 "use client";
 
+import React from "react";
 import { useAgentStore } from "@/store/agentStore";
 import AlertCard from "./AlertCard";
+import { Badge } from "@/components/ui/badge";
 
 export default function AlertFeed() {
   const alerts = useAgentStore((s) => s.alerts);
 
   return (
-    <div className="flex flex-col gap-2 h-full">
-      <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-        Anomaly Alerts
+    <div className="flex flex-col gap-2 h-full font-mono">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+          Anomaly Alerts
+        </h2>
         {alerts.length > 0 && (
-          <span className="ml-2 bg-red-500/10 text-red-400 text-xs px-2 py-0.5 rounded-full border border-red-500/20">
-            {alerts.length}
-          </span>
+          <Badge variant="alert" className="text-[10px]">
+            {alerts.length} ALERTS
+          </Badge>
         )}
-      </h2>
-      <div className="flex flex-col gap-2 overflow-y-auto max-h-64">
+      </div>
+
+      <div className="flex flex-col gap-2 overflow-y-auto max-h-72">
         {alerts.length === 0 ? (
-          <p className="text-slate-500 text-sm">No anomalies detected.</p>
+          <p className="text-zinc-500 text-xs py-4 text-center">
+            No active anomalies detected.
+          </p>
         ) : (
-          alerts.map((alert, i) => <AlertCard key={i} alert={alert} />)
+          alerts.map((alert) => (
+            <AlertCard key={alert.alert_id} alert={alert} />
+          ))
         )}
       </div>
     </div>
