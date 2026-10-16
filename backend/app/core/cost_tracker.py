@@ -1,70 +1,16 @@
-"""
-Cost tracker — persists per-event token usage + cost to Supabase.
-Uses model-specific pricing tables.
-"""
-from typing import Any
-
-import structlog
-from supabase import create_client
-
-from app.config import settings
-
-log = structlog.get_logger()
-
-# USD per 1K tokens (prompt / completion)
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "gpt-4o": (0.005, 0.015),
-    "gpt-4o-mini": (0.00015, 0.0006),
-    "gpt-4-turbo": (0.01, 0.03),
-    "gpt-3.5-turbo": (0.0005, 0.0015),
-    "claude-3-5-sonnet": (0.003, 0.015),
-    "claude-3-haiku": (0.00025, 0.00125),
-    "gemini-1.5-pro": (0.00125, 0.005),
-    "default": (0.001, 0.002),
-}
-
-
-def _estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    price_in, price_out = MODEL_PRICING.get(model, MODEL_PRICING["default"])
-    return round(
-        (prompt_tokens / 1000) * price_in + (completion_tokens / 1000) * price_out, 6
-    )
-
+"""Idempotent aggregation from persisted event records."""
+from collections import defaultdict
+from datetime import datetime
+from typing import Literal
+from app.models.event import Event
 
 class CostTracker:
-    def __init__(self) -> None:
-        self._sb = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
-
-    def record(self, event: dict[str, Any]) -> None:
-        tokens = event.get("tokens")
-        if not tokens:
-            return
-
-        model = event.get("payload", {}).get("model", "default")
-        prompt_t = tokens.get("prompt", 0)
-        completion_t = tokens.get("completion", 0)
-        total_t = tokens.get("total", prompt_t + completion_t)
-        cost = _estimate_cost(model, prompt_t, completion_t)
-
-        try:
-            self._sb.table("costs").insert(
-                {
-                    "agent_id": event.get("agent_id"),
-                    "task_id": event.get("task_id"),
-                    "model": model,
-                    "prompt_tokens": prompt_t,
-                    "completion_tokens": completion_t,
-                    "total_tokens": total_t,
-                    "cost_usd": cost,
-                }
-            ).execute()
-
-            # Alert if cumulative cost exceeds threshold
-            if cost >= settings.COST_ALERT_THRESHOLD_USD:
-                log.warning(
-                    "cost_tracker.threshold_exceeded",
-                    agent_id=event.get("agent_id"),
-                    cost=cost,
-                )
-        except Exception as exc:
-            log.error("cost_tracker.record_error", error=str(exc))
+    def __init__(self, store) -> None: self.store = store
+    async def record(self, event: Event) -> bool: return await self.store.ingest(event)
+    async def summary(self, group_by: Literal["agent", "task", "team"], start: datetime | None = None, end: datetime | None = None) -> list[dict]:
+        totals = defaultdict(lambda: {"tokens_in": 0, "tokens_out": 0, "total_cost_usd": 0.0})
+        for event in await self.store.events(start, end):
+            key = getattr(event, f"{group_by}_id")
+            if key is not None:
+                row = totals[key]; row["tokens_in"] += event.tokens_in; row["tokens_out"] += event.tokens_out; row["total_cost_usd"] += event.cost_usd
+        return [{"group_id": k, "group_by": group_by, **v, "total_cost_usd": round(v["total_cost_usd"], 6)} for k, v in sorted(totals.items())]

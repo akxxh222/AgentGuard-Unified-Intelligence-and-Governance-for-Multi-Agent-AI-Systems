@@ -1,52 +1,28 @@
-"""
-WebSocket connection manager — broadcasts events to all connected clients.
-"""
+"""Separate event and governance WebSocket fan-out channels."""
 import asyncio
-import json
-from typing import Any
-
-import structlog
+from datetime import datetime, timezone
 from fastapi import WebSocket
 
-log = structlog.get_logger()
-
-
 class WebSocketManager:
-    """Manages active WebSocket connections and fan-outs events."""
-
-    def __init__(self) -> None:
-        self._connections: list[WebSocket] = []
-        self._lock = asyncio.Lock()
-
-    async def connect(self, ws: WebSocket) -> None:
-        await ws.accept()
-        async with self._lock:
-            self._connections.append(ws)
-        log.info("ws.client_connected", total=len(self._connections))
-
-    async def disconnect(self, ws: WebSocket) -> None:
-        async with self._lock:
-            self._connections = [c for c in self._connections if c is not ws]
-        log.info("ws.client_disconnected", total=len(self._connections))
-
-    async def broadcast(self, event: dict[str, Any]) -> None:
-        """Send JSON event to all connected clients."""
-        message = json.dumps(event)
-        dead: list[WebSocket] = []
-        async with self._lock:
-            connections = list(self._connections)
-        for ws in connections:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            await self.disconnect(ws)
-
-    @property
-    def active_connections(self) -> int:
-        return len(self._connections)
-
-
-# Singleton
+    def __init__(self) -> None: self._channels = {"events": set(), "alerts": set()}; self._lock = asyncio.Lock()
+    async def connect(self, channel: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        async with self._lock: self._channels[channel].add(websocket)
+        await websocket.send_json({"type": "connection_status", "timestamp": datetime.now(timezone.utc).isoformat(), "data": {"channel": channel, "connected": True}})
+    async def disconnect(self, channel: str, websocket: WebSocket) -> None:
+        async with self._lock: self._channels[channel].discard(websocket)
+    async def broadcast(self, channel: str, message_type: str, data: dict) -> None:
+        envelope = {"type": message_type, "timestamp": datetime.now(timezone.utc).isoformat(), "data": data}
+        async with self._lock: clients = list(self._channels[channel])
+        dead = []
+        for client in clients:
+            try: await client.send_json(envelope)
+            except Exception: dead.append(client)
+        for client in dead: await self.disconnect(channel, client)
+    async def close(self) -> None:
+        for channel in list(self._channels):
+            async with self._lock: clients = list(self._channels[channel]); self._channels[channel].clear()
+            for client in clients:
+                try: await client.close(code=1001)
+                except Exception: pass
 ws_manager = WebSocketManager()

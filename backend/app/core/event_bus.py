@@ -1,87 +1,53 @@
-"""
-Redis Streams consumer — reads normalized agent events and fans out
-to the WebSocket manager and anomaly engine.
-"""
+"""Redis Streams consumer with validate-before-ack semantics."""
 import asyncio
 import json
-from typing import Any
-
 import redis.asyncio as aioredis
-import structlog
-
+import logging
 from app.api.websocket.manager import ws_manager
 from app.config import settings
 from app.core.log_normalizer import LogNormalizer
 
-log = structlog.get_logger()
-
-
+log = logging.getLogger(__name__)
 class EventBus:
-    """Consumes Redis Stream `agent_events` and dispatches to downstream consumers."""
-
-    def __init__(self) -> None:
-        self._redis: aioredis.Redis | None = None
-        self._task: asyncio.Task | None = None
-        self._running = False
-        self._normalizer = LogNormalizer()
-
+    def __init__(self, store) -> None:
+        self.store = store; self._redis = None; self._task = None; self._running = False; self._normalizer = LogNormalizer()
     async def start(self) -> None:
-        self._redis = await aioredis.from_url(
-            settings.REDIS_URL, decode_responses=True
-        )
-        # Ensure consumer group exists
         try:
-            await self._redis.xgroup_create(
-                settings.REDIS_STREAM_KEY,
-                settings.REDIS_CONSUMER_GROUP,
-                id="0",
-                mkstream=True,
-            )
-        except Exception:
-            pass  # group already exists
-
-        self._running = True
-        self._task = asyncio.create_task(self._consume_loop())
-        log.info("event_bus.started", stream=settings.REDIS_STREAM_KEY)
-
+            self._redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False, socket_connect_timeout=2)
+            await self._redis.ping()
+            try: await self._redis.xgroup_create(settings.REDIS_STREAM_KEY, settings.REDIS_CONSUMER_GROUP, id="0", mkstream=True)
+            except Exception: pass
+            self._running = True; self._task = asyncio.create_task(self._consume_loop())
+        except Exception as exc: log.warning("event_bus unavailable: %s", exc)
     async def stop(self) -> None:
         self._running = False
-        if self._task:
-            self._task.cancel()
-        if self._redis:
-            await self._redis.aclose()
-        log.info("event_bus.stopped")
-
+        if self._task: self._task.cancel(); await asyncio.gather(self._task, return_exceptions=True)
+        if self._redis: await self._redis.aclose()
+    async def ready(self) -> bool:
+        try: return self._redis is not None and bool(await self._redis.ping())
+        except Exception: return False
     async def _consume_loop(self) -> None:
+        delay = .25
         while self._running:
             try:
-                results: list[Any] = await self._redis.xreadgroup(  # type: ignore[union-attr]
-                    groupname=settings.REDIS_CONSUMER_GROUP,
-                    consumername=settings.REDIS_CONSUMER_NAME,
-                    streams={settings.REDIS_STREAM_KEY: ">"},
-                    count=10,
-                    block=1000,
-                )
-                for _stream, messages in results:
-                    for msg_id, fields in messages:
-                        await self._handle(msg_id, fields)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                log.error("event_bus.error", error=str(exc))
-                await asyncio.sleep(1)
-
-    async def _handle(self, msg_id: str, fields: dict[str, str]) -> None:
+                rows = await self._redis.xreadgroup(settings.REDIS_CONSUMER_GROUP, settings.REDIS_CONSUMER_NAME, {settings.REDIS_STREAM_KEY: ">"}, count=20, block=1000)
+                for _, messages in rows:
+                    for message_id, fields in messages: await self._handle(message_id, fields)
+                delay = .25
+            except asyncio.CancelledError: break
+            except Exception as exc: log.error("event_bus read failed: %s", exc); await asyncio.sleep(delay); delay = min(delay * 2, 10)
+    async def _handle(self, message_id, fields) -> None:
         try:
-            raw = json.loads(fields.get("payload", "{}"))
-            event = self._normalizer.normalize(raw)
-            # Broadcast to all WebSocket clients
-            await ws_manager.broadcast({"type": "event.raw", "ts": event.get("ts"), "data": event})
-            # Acknowledge the message
-            await self._redis.xack(  # type: ignore[union-attr]
-                settings.REDIS_STREAM_KEY,
-                settings.REDIS_CONSUMER_GROUP,
-                msg_id,
-            )
-        except Exception as exc:
-            log.error("event_bus.handle_error", msg_id=msg_id, error=str(exc))
+            event = self._normalizer.normalize(fields)
+        except ValueError as exc:
+            log.warning("invalid event %s: %s", message_id, exc)
+            # Invalid messages are copied to a dead-letter stream then acknowledged.
+            await self._redis.xadd(settings.REDIS_DEAD_LETTER_STREAM, {"original_id": message_id, "fields": json.dumps({str(k): str(v) for k,v in fields.items()}), "error": str(exc)})
+            await self._redis.xack(settings.REDIS_STREAM_KEY, settings.REDIS_CONSUMER_GROUP, message_id); return
+        inserted = await self.store.ingest(event)
+        if inserted:
+            data = event.model_dump(mode="json"); await ws_manager.broadcast("events", "agent_event", data)
+            if event.status.value in {"failed", "quarantined"} or event.event_type.value == "error":
+                alert = await self.store.add_alert(event)
+                await ws_manager.broadcast("alerts", "alert", alert)
+        await self._redis.xack(settings.REDIS_STREAM_KEY, settings.REDIS_CONSUMER_GROUP, message_id)
