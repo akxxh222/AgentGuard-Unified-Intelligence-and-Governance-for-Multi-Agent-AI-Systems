@@ -1,0 +1,27 @@
+version: "3.9"
+
+# Dev overrides — hot reload, bind mounts, no production optimisations
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ../backend:/app
+    environment:
+      - ENVIRONMENT=development
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    command: npm run dev
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
