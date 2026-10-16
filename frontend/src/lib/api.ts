@@ -1,43 +1,62 @@
-/**
- * REST API client — thin wrapper around fetch.
- */
+import { env } from "@/lib/env";
+import { logger } from "@/lib/logger";
+import type {
+  AgentSummary,
+  CostAttribution,
+  Alert,
+  Escalation,
+  AgentEvent,
+} from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE_URL = env.NEXT_PUBLIC_API_URL;
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    ...init,
-  });
-  if (!res.ok) {
-    throw new Error(`API ${res.status}: ${path}`);
+async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const url = `${BASE_URL}${endpoint}`;
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`API error ${res.status}: ${res.statusText}`);
+    }
+
+    return (await res.json()) as T;
+  } catch (error) {
+    logger.error(`Failed to fetch ${url}`, error);
+    throw error;
   }
-  return res.json() as Promise<T>;
 }
 
-import type { Agent, Task, CostSummary, Escalation } from "./types";
-
 export const api = {
-  agents: {
-    list: () => request<Agent[]>("/api/v1/agents"),
-    get: (id: string) => request<Agent>(`/api/v1/agents/${id}`),
-  },
-  tasks: {
-    list: (params?: { agent_id?: string; status?: string }) => {
-      const qs = new URLSearchParams(params as Record<string, string>).toString();
-      return request<Task[]>(`/api/v1/tasks${qs ? `?${qs}` : ""}`);
-    },
-  },
-  costs: {
-    summary: () => request<CostSummary>("/api/v1/costs"),
-    byAgent: (id: string) => request<CostSummary>(`/api/v1/costs/${id}`),
-  },
-  escalations: {
-    list: () => request<Escalation[]>("/api/v1/escalations"),
-    resolve: (id: string, action: string, notes?: string) =>
-      request(`/api/v1/escalations/${id}/resolve`, {
-        method: "POST",
-        body: JSON.stringify({ action, notes }),
-      }),
-  },
+  // Teammate 2 — Minimal Collector API endpoints
+  getHealth: () => request<{ status: string; version?: string }>("/health"),
+  getEvents: () => request<AgentEvent[]>("/events"),
+  getAlerts: () => request<Alert[]>("/alerts"),
+
+  // Extended management endpoints
+  getAgents: () => request<AgentSummary[]>("/agents"),
+  getAgentById: (id: string) => request<AgentSummary>(`/agents/${encodeURIComponent(id)}`),
+  getCosts: (groupBy: "agent" | "team" | "task" = "agent") =>
+    request<CostAttribution[]>(`/costs?group_by=${groupBy}`),
+  getAlertById: (id: string) => request<Alert>(`/alerts/${encodeURIComponent(id)}`),
+  getEscalations: () => request<Escalation[]>("/escalations"),
+  approveEscalation: (id: string, note?: string) =>
+    request<{ success: boolean }>(`/escalations/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+  rejectEscalation: (id: string, reason?: string) =>
+    request<{ success: boolean }>(`/escalations/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+  getTraces: () =>
+    request<Array<{ trace_id: string; root_agent: string; total_cost: number; duration_ms: number; started_at: string }>>("/traces"),
+  getTraceEvents: (traceId: string) =>
+    request<AgentEvent[]>(`/traces/${encodeURIComponent(traceId)}/events`),
 };

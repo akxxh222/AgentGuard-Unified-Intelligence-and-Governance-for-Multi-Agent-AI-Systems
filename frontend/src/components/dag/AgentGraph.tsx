@@ -1,12 +1,14 @@
 "use client";
 
-import ReactFlow, {
+import React from "react";
+import {
+  ReactFlow,
   Background,
   Controls,
   MiniMap,
   BackgroundVariant,
-} from "reactflow";
-import "reactflow/dist/style.css";
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { useDAG } from "@/hooks/useDAG";
 import AgentNode from "./AgentNode";
 
@@ -16,20 +18,22 @@ export default function AgentGraph() {
   const { nodes, edges } = useDAG();
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      fitView
-      className="bg-[#0a0a0f]"
-    >
-      <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#1e1e2e" />
-      <Controls className="!bg-[#111118] !border-[#1e1e2e]" />
-      <MiniMap
-        nodeColor={(n) => n.data?.color ?? "#6366f1"}
-        maskColor="rgba(10,10,15,0.7)"
-        className="!bg-[#111118] !border-[#1e1e2e]"
-      />
-    </ReactFlow>
+    <div className="w-full h-full min-h-[300px]">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        fitView
+        className="bg-zinc-950"
+      >
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#27272a" />
+        <Controls className="!bg-zinc-900 !border-zinc-800 !fill-zinc-400" />
+        <MiniMap
+          nodeColor="#3f3f46"
+          maskColor="rgba(9, 9, 11, 0.7)"
+          className="!bg-zinc-900 !border-zinc-800"
+        />
+      </ReactFlow>
+    </div>
   );
 }
